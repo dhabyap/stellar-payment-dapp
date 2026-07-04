@@ -1,12 +1,23 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { checkFreighter, connectWallet, fetchBalance, sendXLM } from "@/lib/stellar";
+import { checkFreighter, connectWallet, fetchBalance, fetchPaymentHistory, sendXLM } from "@/lib/stellar";
 
 type TxStatus = {
   type: "success" | "error" | "loading" | null;
   message?: string;
   hash?: string;
+};
+
+type Payment = {
+  id: string;
+  type: string;
+  sender: string;
+  receiver: string;
+  amount: string;
+  assetType: string;
+  timestamp: string;
+  transactionHash: string;
 };
 
 const shorten = (key: string) => `${key.slice(0, 4)}...${key.slice(-4)}`;
@@ -18,10 +29,20 @@ export default function Home() {
   const [dest, setDest] = useState("");
   const [amount, setAmount] = useState("");
   const [txStatus, setTxStatus] = useState<TxStatus>({ type: null });
+  const [tab, setTab] = useState<"send" | "history">("send");
+  const [history, setHistory] = useState<Payment[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
 
   useEffect(() => {
     checkFreighter().then((res) => setWalletInstalled(res.isConnected));
   }, []);
+
+  const loadHistory = async (key: string) => {
+    setLoadingHistory(true);
+    const payments = await fetchPaymentHistory(key);
+    setHistory(payments as Payment[]);
+    setLoadingHistory(false);
+  };
 
   const handleConnect = async () => {
     const key = await connectWallet();
@@ -29,6 +50,7 @@ export default function Home() {
       setPublicKey(key);
       const bal = await fetchBalance(key);
       setBalance(bal);
+      loadHistory(key);
     }
   };
 
@@ -36,6 +58,7 @@ export default function Home() {
     setPublicKey(null);
     setBalance(null);
     setTxStatus({ type: null });
+    setHistory([]);
   };
 
   const handleSend = async () => {
@@ -44,16 +67,18 @@ export default function Home() {
     const result = await sendXLM(publicKey, dest.trim(), amount);
     if (result.success) {
       setTxStatus({ type: "success", hash: result.hash, message: "Transaction successful!" });
-      // refresh balance
       const bal = await fetchBalance(publicKey);
       setBalance(bal);
+      loadHistory(publicKey);
     } else {
       setTxStatus({ type: "error", message: result.error || "Transaction failed" });
     }
   };
 
+  const isIncoming = (p: Payment) => p.receiver === publicKey;
+
   return (
-    <div className="flex flex-1 flex-col items-center justify-center p-4 sm:p-8">
+    <div className="flex flex-1 flex-col items-center p-4 sm:p-8">
       <main className="w-full max-w-md space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
@@ -95,8 +120,34 @@ export default function Home() {
           </div>
         )}
 
-        {/* Transaction form */}
+        {/* Tabs */}
         {publicKey && (
+          <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-800 dark:bg-zinc-900">
+            <button
+              onClick={() => setTab("send")}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
+                tab === "send"
+                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              }`}
+            >
+              Send
+            </button>
+            <button
+              onClick={() => setTab("history")}
+              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
+                tab === "history"
+                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
+                  : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
+              }`}
+            >
+              History
+            </button>
+          </div>
+        )}
+
+        {/* Send tab */}
+        {publicKey && tab === "send" && (
           <div className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
             <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
               Send XLM
@@ -159,6 +210,68 @@ export default function Home() {
           <div className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
             <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
             {txStatus.message}
+          </div>
+        )}
+
+        {/* History tab */}
+        {publicKey && tab === "history" && (
+          <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+              <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                Payment History
+              </h2>
+            </div>
+            <div className="max-h-96 overflow-y-auto">
+              {loadingHistory ? (
+                <div className="flex items-center justify-center gap-2 p-6 text-sm text-zinc-500">
+                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
+                  Loading...
+                </div>
+              ) : history.length === 0 ? (
+                <p className="p-6 text-center text-sm text-zinc-500">
+                  No transactions yet.
+                </p>
+              ) : (
+                history.map((p) => (
+                  <div
+                    key={p.id}
+                    className="border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-block h-2 w-2 rounded-full ${
+                            isIncoming(p)
+                              ? "bg-emerald-500"
+                              : "bg-red-400"
+                          }`}
+                        />
+                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
+                          {isIncoming(p) ? "Received" : "Sent"}
+                        </span>
+                      </div>
+                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
+                        {isIncoming(p) ? "+" : "-"}{p.amount}
+                      </span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-xs text-zinc-500">
+                      <span>
+                        {isIncoming(p) ? "From: " : "To: "}
+                        <span className="font-mono">{shorten(isIncoming(p) ? p.sender : p.receiver)}</span>
+                      </span>
+                    </div>
+                    <div className="mt-0.5 text-xs text-zinc-400">
+                      {new Date(p.timestamp).toLocaleString("id-ID")}
+                    </div>
+                    {p.transactionHash && (
+                      <div className="mt-0.5 font-mono text-[10px] text-zinc-400 truncate">
+                        TX: {p.transactionHash}
+                      </div>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </div>
         )}
 

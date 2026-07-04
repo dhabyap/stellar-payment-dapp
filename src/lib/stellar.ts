@@ -34,6 +34,30 @@ export const fetchBalance = async (publicKey: string) => {
   }
 };
 
+export const fetchPaymentHistory = async (publicKey: string) => {
+  try {
+    const payments = await server
+      .payments()
+      .forAccount(publicKey)
+      .limit(50)
+      .order("desc")
+      .call();
+    return payments.records.map((p: any) => ({
+      id: p.id,
+      type: p.type,
+      sender: p.from,
+      receiver: p.to,
+      amount: `${p.amount} ${p.asset_type === "native" ? "XLM" : p.asset_code || ""}`,
+      assetType: p.asset_type,
+      timestamp: p.created_at,
+      transactionHash: p.transaction_hash,
+    }));
+  } catch (error) {
+    console.error("Error fetching payment history", error);
+    return [];
+  }
+};
+
 export const sendXLM = async (sender: string, destination: string, amount: string) => {
   try {
     const account = await server.loadAccount(sender);
