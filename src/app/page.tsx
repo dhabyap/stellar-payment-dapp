@@ -2,18 +2,30 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import {
-  checkFreighter,
+  checkWallets,
   connectWallet,
   fetchBalance,
   fetchPaymentHistory,
   sendXLM,
+  ERR,
+  WalletError,
 } from "@/lib/stellar";
+import {
+  createPayment,
+  initContract,
+  pollPayments,
+} from "@/lib/contract";
+
+// ── Contract address (testnet) ──
+const CONTRACT_ID = "CCT2M2PKPKNHT4IITJW2WKFGVXFNH6TGP3IUZHBQAV7MBOQDDNNK5IFS";
 
 type TxStatus = {
   type: "success" | "error" | "loading" | null;
   message?: string;
   hash?: string;
 };
+
+type TxStep = "idle" | "signing" | "broadcasting" | "confirmed" | "failed";
 
 type Payment = {
   id: string;
@@ -24,6 +36,7 @@ type Payment = {
   assetType: string;
   timestamp: string;
   transactionHash: string;
+  contractStatus?: "Pending" | "Completed" | "Failed";
 };
 
 const shorten = (key: string | null | undefined) =>
@@ -102,13 +115,73 @@ const IconPlus = () => (
   </svg>
 );
 
+const IconClose = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="18" y1="6" x2="6" y2="18" />
+    <line x1="6" y1="6" x2="18" y2="18" />
+  </svg>
+);
+
+// ── Wallet item component ──
+interface WalletItemProps {
+  name: string;
+  desc: string;
+  detected: boolean;
+  icon: string;
+  onClick: () => void;
+}
+
+function WalletItem({ name, desc, detected, icon, onClick }: WalletItemProps) {
+  return (
+    <button
+      className="wallet-item"
+      disabled={!detected}
+      onClick={onClick}
+    >
+      <div className="wallet-icon">{icon}</div>
+      <div className="wallet-info">
+        <div className="wallet-name">{name}</div>
+        <div className="wallet-desc">{detected ? desc : "Not detected — install extension"}</div>
+      </div>
+      {detected && <span className="wallet-arrow">→</span>}
+      {!detected && <span className="wallet-badge">Missing</span>}
+    </button>
+  );
+}
+
+// ── Tx Step Progress ──
+function TxProgress({ step }: { step: TxStep }) {
+  if (step === "idle") return null;
+  const steps: { key: TxStep; label: string }[] = [
+    { key: "signing", label: "Signing" },
+    { key: "broadcasting", label: "Broadcasting" },
+    { key: "confirmed", label: "Confirmed" },
+  ];
+  const activeIdx = steps.findIndex((s) => s.key === step);
+  return (
+    <div className="tx-progress">
+      {steps.map((s, i) => (
+        <div key={s.key} className={`tx-step ${i <= activeIdx || step === "confirmed" ? "active" : ""} ${step === "failed" && i === 0 ? "failed" : ""}`}>
+          <div className="step-dot">{i <= activeIdx || step === "confirmed" ? (step === "failed" && i === 0 ? "✕" : "✓") : ""}</div>
+          <span className="step-label">{s.label}</span>
+          {i < steps.length - 1 && <div className="step-line" />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function Home() {
   const [walletInstalled, setWalletInstalled] = useState(false);
+  const [detectedWallets, setDetectedWallets] = useState<string[]>([]);
+  const [showWalletModal, setShowWalletModal] = useState(false);
   const [publicKey, setPublicKey] = useState<string | null>(null);
+  const [walletId, setWalletId] = useState<string>("");
   const [balance, setBalance] = useState<string | null>(null);
   const [dest, setDest] = useState("");
   const [amount, setAmount] = useState("");
   const [txStatus, setTxStatus] = useState<TxStatus>({ type: null });
+  const [txStep, setTxStep] = useState<TxStep>("idle");
   const [tab, setTab] = useState<"send" | "history">("send");
   const [history, setHistory] = useState<Payment[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
@@ -118,11 +191,15 @@ export default function Home() {
   const [contacts, setContacts] = useState<Contact[]>(DEFAULT_CONTACTS);
   const [savePrompt, setSavePrompt] = useState<{ address: string } | null>(null);
   const [newContactName, setNewContactName] = useState("");
+  const [errorTitle, setErrorTitle] = useState<string | null>(null);
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
-    checkFreighter().then((res) => setWalletInstalled(res.isConnected));
+    checkWallets().then((res) => {
+      setWalletInstalled(res.available);
+      setDetectedWallets(res.detected);
+    });
     const saved = localStorage.getItem("stellar_contacts");
     if (saved) {
       try {
@@ -131,6 +208,21 @@ export default function Home() {
       } catch {}
     }
   }, []);
+
+  // ── Polling contract for real-time status updates ──
+  useEffect(() => {
+    if (!CONTRACT_ID || !publicKey) return;
+    const stop = pollPayments(CONTRACT_ID, publicKey, 5000, (payments) => {
+      setHistory((prev) =>
+        prev.map((p) => {
+          const onChain = payments.find((c) => String(c.id) === p.id);
+          if (onChain) return { ...p, contractStatus: onChain.status };
+          return p;
+        })
+      );
+    });
+    return () => stop();
+  }, [publicKey]);
 
   const showToast = useCallback((msg: string) => {
     clearTimeout(toastTimer.current);
@@ -165,48 +257,115 @@ export default function Home() {
     setLoadingHistory(false);
   }, []);
 
+  // ── Wallet Connect ──
   const handleConnect = async () => {
-    const key = await connectWallet();
-    if (key) {
-      setPublicKey(key);
-      const bal = await fetchBalance(key);
-      setBalance(bal);
-      loadHistory(key);
+    try {
+      const { publicKey: pk, walletId: wid } = await connectWallet();
+      if (pk) {
+        setPublicKey(pk);
+        setWalletId(wid);
+        setShowWalletModal(false);
+        const bal = await fetchBalance(pk);
+        setBalance(bal);
+        loadHistory(pk);
+        showToast(`Connected via ${wid}`);
+      }
+    } catch (err: any) {
+      if (err instanceof WalletError) {
+        if (err.code === ERR.REJECTED) {
+          showToast("Koneksi dibatalkan");
+        } else {
+          setErrorTitle(err.message);
+          showToast(err.message);
+        }
+      } else {
+        showToast("Gagal connect wallet");
+      }
     }
   };
 
   const handleDisconnect = () => {
     setPublicKey(null);
+    setWalletId("");
     setBalance(null);
     setTxStatus({ type: null });
+    setTxStep("idle");
     setHistory([]);
+    showToast("Disconnected");
   };
 
   const handleSend = async () => {
     if (!publicKey || !dest.trim() || !amount || parseFloat(amount) <= 0) return;
     const addr = dest.trim();
-    setTxStatus({ type: "loading", message: "Processing..." });
-    const result = await sendXLM(publicKey, addr, amount);
-    if (result.success) {
-      setTxStatus({ type: "success", hash: result.hash, message: "Transaction successful!" });
-      const bal = await fetchBalance(publicKey);
-      setBalance(bal);
-      loadHistory(publicKey);
-      showToast(`${amount} XLM berhasil dikirim`);
-      // Prompt to save contact if unknown
-      if (!contacts.find((c) => c.address === addr)) {
-        setSavePrompt({ address: addr });
+
+    // Pre-check balance
+    const fee = 0.00001;
+    if (balance && parseFloat(balance) < parseFloat(amount) + fee) {
+      setErrorTitle("Saldo tidak mencukupi");
+      setTxStatus({ type: "error", message: `Saldo tidak cukup. Tersedia ${parseFloat(balance).toFixed(2)} XLM.` });
+      showToast("Saldo tidak cukup");
+      return;
+    }
+
+    setTxStep("signing");
+    setTxStatus({ type: "loading", message: "Menunggu konfirmasi wallet..." });
+
+    try {
+      const result = await sendXLM(publicKey, addr, amount);
+
+      setTxStep("broadcasting");
+
+      if (result.success) {
+        // Record on contract (fire & forget — don't block UI)
+        if (CONTRACT_ID) {
+          try {
+            const txHash = await createPayment(
+              publicKey,
+              CONTRACT_ID,
+              addr,
+              amount,
+              "Payment via Stellar Pay"
+            );
+          } catch {}
+        }
+
+        setTxStep("confirmed");
+        setTxStatus({ type: "success", hash: result.hash, message: "Transaction successful!" });
+        const bal = await fetchBalance(publicKey);
+        setBalance(bal);
+        loadHistory(publicKey);
+        showToast(`${amount} XLM berhasil dikirim`);
+
+        if (!contacts.find((c) => c.address === addr)) {
+          setSavePrompt({ address: addr });
+        } else {
+          setTimeout(() => {
+            setDest("");
+            setAmount("");
+            setSelectedContact(null);
+            setTxStatus({ type: null });
+            setTxStep("idle");
+          }, 2000);
+        }
       } else {
-        setTimeout(() => {
-          setDest("");
-          setAmount("");
-          setSelectedContact(null);
-          setTxStatus({ type: null });
-        }, 2000);
+        setTxStep("failed");
+        setTxStatus({ type: "error", message: result.error || "Transaction failed" });
+        showToast("Gagal: " + (result.error || "unknown error"));
       }
-    } else {
-      setTxStatus({ type: "error", message: result.error || "Transaction failed" });
-      showToast("Gagal: " + (result.error || "unknown error"));
+    } catch (err: any) {
+      setTxStep("failed");
+      if (err instanceof WalletError) {
+        if (err.code === ERR.REJECTED) {
+          setErrorTitle("Transaksi dibatalkan");
+          showToast("Dibatalkan oleh wallet");
+        } else {
+          setErrorTitle(err.message);
+          showToast(err.message);
+        }
+      } else {
+        setTxStatus({ type: "error", message: "Gagal mengirim" });
+        showToast("Gagal mengirim");
+      }
     }
   };
 
@@ -221,6 +380,7 @@ export default function Home() {
         setAmount("");
         setSelectedContact(null);
         setTxStatus({ type: null });
+        setTxStep("idle");
       }, 800);
     }
   };
@@ -233,6 +393,7 @@ export default function Home() {
       setAmount("");
       setSelectedContact(null);
       setTxStatus({ type: null });
+      setTxStep("idle");
     }, 200);
   };
 
@@ -251,26 +412,23 @@ export default function Home() {
   const checkSendValid = () =>
     dest.trim().length > 4 && parseFloat(amount) > 0 && txStatus.type !== "loading";
 
-  // ── Resolve contact from typed address ──
   const resolvedContact = dest.trim()
     ? contacts.find((c) => c.address === dest.trim()) || null
     : null;
 
-  // ── Filter history ──
   const filteredHistory = history.filter((p) => {
     if (historyFilter === "all") return true;
     if (historyFilter === "sent") return !isIncoming(p);
     return isIncoming(p);
   });
 
-  // ── Send button state ──
   const btnDisabled = !checkSendValid() || savePrompt !== null;
   let btnContent: React.ReactNode;
   if (txStatus.type === "loading") {
     btnContent = (
       <>
         <div className="spinner" />
-        <span className="send-btn-label">Mengirim...</span>
+        <span className="send-btn-label">{txStep === "signing" ? "Menunggu konfirmasi..." : txStep === "broadcasting" ? "Broadcasting..." : "Processing..."}</span>
       </>
     );
   } else if (txStatus.type === "success") {
@@ -293,6 +451,7 @@ export default function Home() {
     "send-btn",
     txStatus.type === "loading" ? "is-loading" : "",
     txStatus.type === "success" ? "is-success" : "",
+    txStatus.type === "error" ? "is-error" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -312,12 +471,12 @@ export default function Home() {
               Disconnect
             </button>
           ) : (
-            <button className="connect-btn" onClick={handleConnect}>
-              Connect Freighter
+            <button className="connect-btn" onClick={() => setShowWalletModal(true)}>
+              Connect Wallet
             </button>
           )
         ) : (
-          <span className="freighter-missing">Freighter not detected</span>
+          <span className="freighter-missing">No wallet detected</span>
         )}
       </div>
 
@@ -383,6 +542,19 @@ export default function Home() {
             <p className="card-subtitle">
               Kirim XLM langsung ke wallet tujuan dalam hitungan detik.
             </p>
+
+            {/* Tx Progress */}
+            <TxProgress step={txStep} />
+
+            {/* Error banner */}
+            {errorTitle && txStatus.type === "error" && (
+              <div className="error-banner">
+                <span>{errorTitle}</span>
+                <button className="error-close" onClick={() => { setErrorTitle(null); setTxStatus({ type: null }); setTxStep("idle"); }}>
+                  <IconClose />
+                </button>
+              </div>
+            )}
 
             <div className="contacts-row">
               <div className="field-label-row">
@@ -520,14 +692,8 @@ export default function Home() {
 
             {/* Save contact prompt */}
             {savePrompt && (
-              <div style={{
-                marginTop: 12,
-                padding: 14,
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--card-border)",
-                borderRadius: "var(--radius-sm)",
-              }}>
-                <p style={{ fontSize: 13, color: "var(--ink-dim)", margin: "0 0 10px" }}>
+              <div className="save-prompt">
+                <p className="save-prompt-text">
                   Simpan <span className="mono" style={{ color: "var(--mint)" }}>{shorten(savePrompt.address)}</span> sebagai kontak?
                 </p>
                 <div style={{ display: "flex", gap: 8 }}>
@@ -541,33 +707,14 @@ export default function Home() {
                     autoFocus
                   />
                   <button
-                    style={{
-                      background: "var(--mint-dim)",
-                      border: "none",
-                      color: "var(--mint)",
-                      padding: "8px 14px",
-                      borderRadius: "var(--radius-sm)",
-                      fontFamily: "inherit",
-                      fontWeight: 700,
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="save-btn"
                     disabled={!newContactName.trim()}
                     onClick={handleSaveConfirm}
                   >
                     Simpan
                   </button>
                   <button
-                    style={{
-                      background: "transparent",
-                      border: "1px solid var(--card-border)",
-                      color: "var(--ink-dim)",
-                      padding: "8px 14px",
-                      borderRadius: "var(--radius-sm)",
-                      fontFamily: "inherit",
-                      fontSize: 13,
-                      cursor: "pointer",
-                    }}
+                    className="skip-btn"
                     onClick={handleSaveSkip}
                   >
                     Lewati
@@ -621,17 +768,8 @@ export default function Home() {
           </div>
 
           {loadingHistory ? (
-            <div
-              style={{
-                textAlign: "center",
-                padding: 48,
-                color: "var(--ink-faint)",
-              }}
-            >
-              <div
-                className="spinner"
-                style={{ margin: "0 auto 12px" }}
-              />
+            <div className="empty-state" style={{ textAlign: "center", padding: 48, color: "var(--ink-faint)" }}>
+              <div className="spinner" style={{ margin: "0 auto 12px" }} />
               <p style={{ fontSize: 13, margin: 0 }}>Loading...</p>
             </div>
           ) : filteredHistory.length === 0 ? (
@@ -646,7 +784,6 @@ export default function Home() {
                 const otherAddr = incoming ? p.sender : p.receiver;
                 const avatarColor = incoming ? "var(--mint)" : "var(--coral)";
 
-                // Find contact name for this address
                 const knownContact = contacts.find(
                   (c) => c.address === otherAddr
                 );
@@ -658,6 +795,15 @@ export default function Home() {
                 const avatarText = knownContact
                   ? initials(knownContact.name)
                   : (otherAddr || "").slice(0, 2).toUpperCase();
+
+                // Status badge
+                const statusBadge = p.contractStatus
+                  ? p.contractStatus === "Completed"
+                    ? <span className="status-badge success">✓ Confirmed</span>
+                    : p.contractStatus === "Failed"
+                    ? <span className="status-badge fail">✕ Failed</span>
+                    : <span className="status-badge pending">⏳ Pending</span>
+                  : null;
 
                 return (
                   <div
@@ -692,6 +838,7 @@ export default function Home() {
                         ) : (
                           shorten(otherAddr)
                         )}
+                        {statusBadge}
                       </div>
                       <div className="tx-meta">
                         <span>
@@ -738,7 +885,7 @@ export default function Home() {
       {walletInstalled && !publicKey && (
         <div className="empty-state" style={{ display: "block" }}>
           <IconClock />
-          <p>Connect your Freighter wallet to get started.</p>
+          <p>Connect your wallet to get started.</p>
         </div>
       )}
 
@@ -758,6 +905,64 @@ export default function Home() {
             Freighter wallet
           </a>{" "}
           to use this dApp.
+        </div>
+      )}
+
+      {/* ─── WALLET MODAL ─── */}
+      {showWalletModal && (
+        <div className="modal-overlay" onClick={() => setShowWalletModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Pilih Wallet</h2>
+              <button className="modal-close" onClick={() => setShowWalletModal(false)}>
+                <IconClose />
+              </button>
+            </div>
+            <div className="modal-subtitle">
+              Connect wallet Stellar untuk mulai transaksi
+            </div>
+            <div className="wallet-list">
+              <WalletItem
+                name="Freighter"
+                desc="Browser extension — paling populer"
+                detected={detectedWallets.includes("freighter")}
+                icon="🦅"
+                onClick={handleConnect}
+              />
+              <WalletItem
+                name="LOBSTR"
+                desc="Mobile + extension wallet"
+                detected={detectedWallets.includes("lobstr")}
+                icon="🦞"
+                onClick={handleConnect}
+              />
+              <WalletItem
+                name="xBull"
+                desc="Browser extension — multi-chain"
+                detected={detectedWallets.includes("xbull")}
+                icon="🐂"
+                onClick={handleConnect}
+              />
+              <WalletItem
+                name="WalletConnect"
+                desc="QR code — scan dari mobile wallet"
+                detected={true}
+                icon="📱"
+                onClick={() => showToast("WalletConnect coming soon")}
+              />
+            </div>
+            <div className="modal-footer">
+              Belum punya wallet?{" "}
+              <a
+                href="https://stellar.org/developers/wallets"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: "var(--mint)" }}
+              >
+                Pelajari lebih lanjut
+              </a>
+            </div>
+          </div>
         </div>
       )}
 

@@ -601,3 +601,128 @@ body{
 @media (prefers-reduced-motion: reduce){
   * { transition: none !important; }
 }
+
+/* ── Wallet Modal ── */
+.modal-overlay{
+  position:fixed; top:0; left:0; right:0; bottom:0;
+  background: rgba(0,0,0,0.7);
+  display:flex; align-items:center; justify-content:center;
+  z-index:50;
+  padding:16px;
+}
+.modal{
+  background: var(--card);
+  border:1px solid var(--card-border);
+  border-radius:var(--radius-lg);
+  width:100%; max-width:380px;
+  padding:24px;
+}
+.modal-header{
+  display:flex; justify-content:space-between; align-items:center;
+  margin-bottom:4px;
+}
+.modal-title{
+  font-size:17px; font-weight:700; margin:0;
+}
+.modal-close{
+  background:none; border:none; color:var(--ink-faint);
+  cursor:pointer; padding:4px; display:flex;
+}
+.modal-close:hover{ color:var(--ink); }
+.modal-subtitle{
+  font-size:13px; color:var(--ink-faint);
+  margin-bottom:20px;
+}
+.wallet-list{ display:flex; flex-direction:column; gap:8px; }
+.wallet-item{
+  display:flex; align-items:center; gap:12px;
+  width:100%; text-align:left;
+  background:var(--bg-elevated); border:1px solid var(--card-border);
+  border-radius:var(--radius-sm); padding:14px;
+  cursor:pointer; font-family:inherit; color:var(--ink);
+  transition:border-color .15s ease;
+}
+.wallet-item:disabled{ opacity:0.5; cursor:not-allowed; }
+.wallet-item:not(:disabled):hover{ border-color:var(--mint); }
+.wallet-icon{ font-size:24px; width:36px; text-align:center; }
+.wallet-info{ flex:1; }
+.wallet-name{ font-size:14px; font-weight:600; }
+.wallet-desc{ font-size:12px; color:var(--ink-faint); margin-top:2px; }
+.wallet-arrow{ color:var(--mint); font-size:16px; }
+.wallet-badge{ font-size:10px; color:var(--ink-faint); background:var(--bg); border-radius:6px; padding:2px 8px; }
+.modal-footer{
+  margin-top:20px; font-size:12px; color:var(--ink-faint); text-align:center;
+}
+
+/* ── Tx Progress ── */
+.tx-progress{
+  display:flex; justify-content:center; gap:8px;
+  margin-bottom:16px; padding:12px; background:var(--bg-elevated);
+  border-radius:var(--radius-sm);
+}
+.tx-step{
+  display:flex; align-items:center; gap:6px;
+  font-size:11px; color:var(--ink-faint);
+}
+.step-dot{
+  width:18px; height:18px; border-radius:50%;
+  border:2px solid var(--card-border);
+  display:flex; align-items:center; justify-content:center;
+  font-size:9px; font-weight:700; flex-shrink:0;
+  color:transparent;
+}
+.tx-step.active{ color:var(--ink); }
+.tx-step.active .step-dot{
+  border-color:var(--mint); background:var(--mint); color:#06120D;
+}
+.tx-step.failed .step-dot{
+  border-color:var(--coral); background:var(--coral); color:#fff;
+}
+.step-line{ width:16px; height:2px; background:var(--card-border); }
+
+/* ── Error Banner ── */
+.error-banner{
+  display:flex; align-items:center; justify-content:space-between;
+  background:var(--coral-dim); border:1px solid var(--coral);
+  border-radius:var(--radius-sm); padding:10px 14px;
+  margin-bottom:14px; font-size:13px; color:var(--coral); font-weight:500;
+}
+.error-close{ background:none; border:none; color:var(--coral); cursor:pointer; padding:2px; display:flex; }
+
+/* ── Status Badges ── */
+.status-badge{
+  display:inline-flex; align-items:center; gap:3px;
+  font-size:10px; font-weight:700; padding:2px 6px;
+  border-radius:6px; margin-left:4px;
+}
+.status-badge.pending{ background:var(--violet-dim); color:var(--violet); }
+.status-badge.success{ background:var(--mint-dim); color:var(--mint); }
+.status-badge.fail{ background:var(--coral-dim); color:var(--coral); }
+
+/* ── Save Prompt ── */
+.save-prompt{
+  margin-top:12px; padding:14px;
+  background:var(--bg-elevated); border:1px solid var(--card-border);
+  border-radius:var(--radius-sm);
+}
+.save-prompt-text{ font-size:13px; color:var(--ink-dim); margin:0 0 10px; }
+
+.save-btn{
+  display:flex; align-items:center; gap:6px;
+  background:var(--mint-dim); border:none;
+  color:var(--mint); padding:8px 14px;
+  border-radius:var(--radius-sm); font-family:inherit;
+  font-weight:700; font-size:13px; cursor:pointer;
+}
+.save-btn:disabled{ opacity:0.4; cursor:not-allowed; }
+
+.skip-btn{
+  background:transparent; border:1px solid var(--card-border);
+  color:var(--ink-dim); padding:8px 14px;
+  border-radius:var(--radius-sm); font-family:inherit;
+  font-size:13px; cursor:pointer;
+}
+
+.send-btn.is-error{
+  background:var(--coral-dim); color:var(--coral); cursor:not-allowed;
+}
