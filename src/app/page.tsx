@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { checkFreighter, connectWallet, fetchBalance, fetchPaymentHistory, sendXLM } from "@/lib/stellar";
+import { useState, useEffect, useRef, useCallback } from "react";
+import {
+  checkFreighter,
+  connectWallet,
+  fetchBalance,
+  fetchPaymentHistory,
+  sendXLM,
+} from "@/lib/stellar";
 
 type TxStatus = {
   type: "success" | "error" | "loading" | null;
@@ -20,7 +26,74 @@ type Payment = {
   transactionHash: string;
 };
 
-const shorten = (key: string | null | undefined) => key ? `${key.slice(0, 4)}...${key.slice(-4)}` : "—";
+const shorten = (key: string | null | undefined) =>
+  key ? `${key.slice(0, 4)}...${key.slice(-4)}` : "—";
+
+// ── Contact book ──
+interface Contact {
+  name: string;
+  address: string;
+  color: string;
+}
+
+const DEFAULT_CONTACTS: Contact[] = [
+  { name: "Budi", address: "GDU6XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXYS7F", color: "#6C63E8" },
+  { name: "Sinta", address: "GBR7XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXRMX2", color: "#3ED9A3" },
+  { name: "Rian", address: "GKPLXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX9TQ2", color: "#FF9F5A" },
+];
+
+function initials(name: string) {
+  return name.slice(0, 2).toUpperCase();
+}
+
+// ── SVG icons as components ──
+const IconCopy = () => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const IconLogout = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+    <path d="M16 17l5-5-5-5" />
+    <path d="M21 12H9" />
+  </svg>
+);
+
+const IconSend = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+    <line x1="22" y1="2" x2="11" y2="13" />
+    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+  </svg>
+);
+
+const IconCheck = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+    <polyline points="20 6 9 17 4 12" />
+  </svg>
+);
+
+const IconCopySmall = () => (
+  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <rect x="9" y="9" width="13" height="13" rx="2" />
+    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+  </svg>
+);
+
+const IconShield = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+  </svg>
+);
+
+const IconClock = () => (
+  <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+    <circle cx="12" cy="12" r="10" />
+    <path d="M12 8v4l3 2" />
+  </svg>
+);
 
 export default function Home() {
   const [walletInstalled, setWalletInstalled] = useState(false);
@@ -32,17 +105,28 @@ export default function Home() {
   const [tab, setTab] = useState<"send" | "history">("send");
   const [history, setHistory] = useState<Payment[]>([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
+  const [historyFilter, setHistoryFilter] = useState<"all" | "sent" | "received">("all");
+  const [toastMsg, setToastMsg] = useState("");
+  const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+
+  const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     checkFreighter().then((res) => setWalletInstalled(res.isConnected));
   }, []);
 
-  const loadHistory = async (key: string) => {
+  const showToast = useCallback((msg: string) => {
+    clearTimeout(toastTimer.current);
+    setToastMsg(msg);
+    toastTimer.current = setTimeout(() => setToastMsg(""), 2200);
+  }, []);
+
+  const loadHistory = useCallback(async (key: string) => {
     setLoadingHistory(true);
     const payments = await fetchPaymentHistory(key);
     setHistory(payments as Payment[]);
     setLoadingHistory(false);
-  };
+  }, []);
 
   const handleConnect = async () => {
     const key = await connectWallet();
@@ -63,241 +147,460 @@ export default function Home() {
 
   const handleSend = async () => {
     if (!publicKey || !dest.trim() || !amount || parseFloat(amount) <= 0) return;
-    setTxStatus({ type: "loading", message: "Processing transaction..." });
+    setTxStatus({ type: "loading", message: "Processing..." });
     const result = await sendXLM(publicKey, dest.trim(), amount);
     if (result.success) {
       setTxStatus({ type: "success", hash: result.hash, message: "Transaction successful!" });
       const bal = await fetchBalance(publicKey);
       setBalance(bal);
       loadHistory(publicKey);
+      showToast(`${amount} XLM berhasil dikirim`);
+      // Reset form after a beat
+      setTimeout(() => {
+        setDest("");
+        setAmount("");
+        setSelectedContact(null);
+        setTxStatus({ type: null });
+      }, 2000);
     } else {
       setTxStatus({ type: "error", message: result.error || "Transaction failed" });
+      showToast("Gagal: " + (result.error || "unknown error"));
     }
   };
 
-  const isIncoming = (p: Payment) => publicKey && (p.receiver === publicKey);
+  const copyToClipboard = (text: string, label: string) => {
+    navigator.clipboard?.writeText(text);
+    showToast(label);
+  };
+
+  const isIncoming = (p: Payment) => publicKey && p.receiver === publicKey;
+
+  const handleContactClick = (c: Contact) => {
+    setDest(c.address);
+    setSelectedContact(c);
+  };
+
+  const checkSendValid = () =>
+    dest.trim().length > 4 && parseFloat(amount) > 0 && txStatus.type !== "loading";
+
+  // ── Resolve contact from typed address ──
+  const resolvedContact = dest.trim()
+    ? DEFAULT_CONTACTS.find((c) => c.address === dest.trim()) || null
+    : null;
+
+  // ── Filter history ──
+  const filteredHistory = history.filter((p) => {
+    if (historyFilter === "all") return true;
+    if (historyFilter === "sent") return !isIncoming(p);
+    return isIncoming(p);
+  });
+
+  // ── Send button state ──
+  const btnDisabled = !checkSendValid();
+  let btnContent: React.ReactNode;
+  if (txStatus.type === "loading") {
+    btnContent = (
+      <>
+        <div className="spinner" />
+        <span className="send-btn-label">Mengirim...</span>
+      </>
+    );
+  } else if (txStatus.type === "success") {
+    btnContent = (
+      <>
+        <IconCheck />
+        <span className="send-btn-label">Terkirim!</span>
+      </>
+    );
+  } else {
+    btnContent = (
+      <>
+        <IconSend />
+        <span className="send-btn-label">Send XLM</span>
+      </>
+    );
+  }
+
+  const btnClass = [
+    "send-btn",
+    txStatus.type === "loading" ? "is-loading" : "",
+    txStatus.type === "success" ? "is-success" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <div className="flex flex-1 flex-col items-center p-4 sm:p-8">
-      <main className="w-full max-w-md space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold tracking-tight">Stellar Pay</h1>
-          {walletInstalled ? (
-            publicKey ? (
-              <button
-                onClick={handleDisconnect}
-                className="rounded-lg border border-red-200 px-4 py-1.5 text-sm text-red-600 transition hover:bg-red-50 dark:border-red-800 dark:text-red-400 dark:hover:bg-red-950"
-              >
-                Disconnect
-              </button>
-            ) : (
-              <button
-                onClick={handleConnect}
-                className="rounded-lg bg-indigo-600 px-4 py-1.5 text-sm font-medium text-white transition hover:bg-indigo-700"
-              >
-                Connect Freighter
-              </button>
-            )
-          ) : (
-            <span className="text-sm text-amber-600 dark:text-amber-400">
-              Freighter not detected
-            </span>
-          )}
+    <div className="app">
+      {/* Header */}
+      <div className="header">
+        <div className="brand">
+          <div className="brand-mark">★</div>
+          <div className="brand-name">Stellar Pay</div>
         </div>
-
-        {/* Wallet info */}
-        {publicKey && (
-          <div className="rounded-xl border border-zinc-200 bg-white p-4 text-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="text-zinc-500 dark:text-zinc-400">Address</div>
-            <div className="mt-0.5 font-mono text-zinc-800 dark:text-zinc-200">
-              {shorten(publicKey)}
-            </div>
-            <div className="mt-3 text-zinc-500 dark:text-zinc-400">Balance</div>
-            <div className="mt-0.5 text-2xl font-semibold text-zinc-900 dark:text-zinc-50">
-              {balance !== null ? `${parseFloat(balance).toFixed(2)} XLM` : "—"}
-            </div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        {publicKey && (
-          <div className="flex gap-1 rounded-lg border border-zinc-200 bg-zinc-100 p-1 dark:border-zinc-800 dark:bg-zinc-900">
-            <button
-              onClick={() => setTab("send")}
-              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
-                tab === "send"
-                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
-              }`}
-            >
-              Send
+        {walletInstalled ? (
+          publicKey ? (
+            <button className="disconnect" onClick={handleDisconnect}>
+              <IconLogout />
+              Disconnect
             </button>
-            <button
-              onClick={() => setTab("history")}
-              className={`flex-1 rounded-md px-3 py-2 text-sm font-medium transition ${
-                tab === "history"
-                  ? "bg-white text-zinc-900 shadow-sm dark:bg-zinc-800 dark:text-zinc-100"
-                  : "text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-300"
-              }`}
-            >
-              History
+          ) : (
+            <button className="connect-btn" onClick={handleConnect}>
+              Connect Freighter
             </button>
-          </div>
+          )
+        ) : (
+          <span className="freighter-missing">Freighter not detected</span>
         )}
+      </div>
 
-        {/* Send tab */}
-        {publicKey && tab === "send" && (
-          <div className="space-y-4 rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900">
-            <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-              Send XLM
-            </h2>
+      {/* Balance card */}
+      {publicKey && (
+        <div className="balance-card">
+          <div className="bc-row">
             <div>
-              <label className="block text-xs text-zinc-500 dark:text-zinc-400">
-                Destination Address
-              </label>
-              <input
-                value={dest}
-                onChange={(e) => setDest(e.target.value)}
-                placeholder="G..."
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-mono text-zinc-900 placeholder-zinc-400 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-              />
+              <div className="label-eyebrow">Your balance</div>
             </div>
-            <div>
-              <label className="block text-xs text-zinc-500 dark:text-zinc-400">
-                Amount (XLM)
-              </label>
-              <input
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                type="number"
-                min="0"
-                step="0.0000001"
-                placeholder="0.00"
-                className="mt-1 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm font-mono text-zinc-900 placeholder-zinc-400 focus:border-indigo-500 focus:outline-none dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100"
-              />
-            </div>
-            <button
-              onClick={handleSend}
-              disabled={txStatus.type === "loading" || !dest.trim() || !amount || parseFloat(amount) <= 0}
-              className="w-full rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            <div
+              className="address-chip"
+              title="Salin alamat lengkap"
+              onClick={() => copyToClipboard(publicKey, "Alamat wallet disalin")}
             >
-              {txStatus.type === "loading" ? "Sending..." : "Send XLM"}
-            </button>
+              <IconCopySmall />
+              <span className="mono">{shorten(publicKey)}</span>
+            </div>
           </div>
-        )}
+          <div className="balance-amount">
+            {balance !== null
+              ? parseFloat(balance).toLocaleString("id-ID", {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })
+              : "—"}{" "}
+            <span className="unit">XLM</span>
+          </div>
+          <div className="balance-fiat">
+            ≈ <strong>
+              {balance !== null
+                ? "$" + (parseFloat(balance) * 0.13).toFixed(2)
+                : "$0.00"}
+            </strong>{" "}
+            — kurs saat ini $0.13/XLM
+          </div>
+        </div>
+      )}
 
-        {/* Status feedback */}
-        {txStatus.type && txStatus.type !== "loading" && (
-          <div
-            className={`rounded-xl border p-4 text-sm ${
-              txStatus.type === "success"
-                ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-300"
-                : "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-300"
-            }`}
+      {/* Tabs */}
+      {publicKey && (
+        <div className="tabs">
+          <button
+            className={"tab" + (tab === "send" ? " active" : "")}
+            onClick={() => setTab("send")}
           >
-            <div className="font-medium">{txStatus.message}</div>
-            {txStatus.hash && (
-              <div className="mt-1 font-mono text-xs break-all opacity-80">
-                TX: {txStatus.hash}
+            Send
+          </button>
+          <button
+            className={"tab" + (tab === "history" ? " active" : "")}
+            onClick={() => setTab("history")}
+          >
+            History
+          </button>
+        </div>
+      )}
+
+      {/* ─── SEND PANEL ─── */}
+      {publicKey && (
+        <div className={"panel" + (tab === "send" ? " active" : "")}>
+          <div className="card">
+            <div className="card-title">Send money</div>
+            <p className="card-subtitle">
+              Kirim XLM langsung ke wallet tujuan dalam hitungan detik.
+            </p>
+
+            <div className="contacts-row">
+              <div className="field-label-row">
+                <label>Kirim ke kontak tersimpan</label>
               </div>
-            )}
-          </div>
-        )}
-
-        {/* Loading spinner */}
-        {txStatus.type === "loading" && (
-          <div className="flex items-center justify-center gap-2 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400">
-            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-            {txStatus.message}
-          </div>
-        )}
-
-        {/* History tab */}
-        {publicKey && tab === "history" && (
-          <div className="rounded-xl border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
-              <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-                Payment History
-              </h2>
-            </div>
-            <div className="max-h-96 overflow-y-auto">
-              {loadingHistory ? (
-                <div className="flex items-center justify-center gap-2 p-6 text-sm text-zinc-500">
-                  <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-indigo-500 border-t-transparent" />
-                  Loading...
-                </div>
-              ) : history.length === 0 ? (
-                <p className="p-6 text-center text-sm text-zinc-500">
-                  No transactions yet.
-                </p>
-              ) : (
-                history.map((p) => (
-                  <div
-                    key={p.id}
-                    className="border-b border-zinc-100 px-4 py-3 last:border-0 dark:border-zinc-800"
+              <div className="contacts-scroll">
+                {DEFAULT_CONTACTS.map((c) => (
+                  <button
+                    key={c.name}
+                    className={
+                      "contact-chip" +
+                      (selectedContact?.name === c.name ? " selected" : "")
+                    }
+                    onClick={() => handleContactClick(c)}
                   >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`inline-block h-2 w-2 rounded-full ${
-                            isIncoming(p)
-                              ? "bg-emerald-500"
-                              : "bg-red-400"
-                          }`}
-                        />
-                        <span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                          {isIncoming(p) ? "Received" : "Sent"}
-                        </span>
-                      </div>
-                      <span className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">
-                        {isIncoming(p) ? "+" : "-"}{p.amount}
-                      </span>
+                    <div
+                      className="avatar"
+                      style={{ background: c.color }}
+                    >
+                      {initials(c.name)}
                     </div>
-                    <div className="mt-1 flex items-center justify-between text-xs text-zinc-500">
-                      <span>
-                        {isIncoming(p) ? "From: " : "To: "}
-                        <span className="font-mono">{shorten(isIncoming(p) ? p.sender : p.receiver)}</span>
-                      </span>
-                    </div>
-                    <div className="mt-0.5 text-xs text-zinc-400">
-                      {new Date(p.timestamp).toLocaleString("id-ID")}
-                    </div>
-                    {p.transactionHash && (
-                      <div className="mt-0.5 font-mono text-[10px] text-zinc-400 truncate">
-                        TX: {p.transactionHash}
-                      </div>
-                    )}
+                    <span className="cname">{c.name}</span>
+                  </button>
+                ))}
+                <button className="contact-chip new-contact" onClick={() => showToast("Kontak baru bisa disimpan setelah transaksi pertama")}>
+                  <div className="avatar">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <line x1="12" y1="5" x2="12" y2="19" />
+                      <line x1="5" y1="12" x2="19" y2="12" />
+                    </svg>
                   </div>
-                ))
+                  <span className="cname">Baru</span>
+                </button>
+              </div>
+            </div>
+
+            <div className="field">
+              <label>Send to</label>
+              <input
+                className="input"
+                type="text"
+                placeholder="Alamat wallet penerima (G...)"
+                value={dest}
+                onChange={(e) => {
+                  setDest(e.target.value);
+                  setSelectedContact(null);
+                }}
+              />
+              <div className="hint" style={{ display: resolvedContact ? "none" : "block" }}>
+                Tempel alamat Stellar milik penerima, bukan email atau username.
+              </div>
+              {resolvedContact && (
+                <div className="resolved-contact show">
+                  <div
+                    className="mini-avatar"
+                    style={{ background: resolvedContact.color }}
+                  >
+                    {initials(resolvedContact.name)}
+                  </div>
+                  <span>Mengirim ke {resolvedContact.name}</span>
+                </div>
               )}
             </div>
-          </div>
-        )}
 
-        {/* Freighter not installed */}
-        {!walletInstalled && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-300">
-            Install{" "}
-            <a
-              href="https://freighter.app"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-medium underline underline-offset-2"
+            <div className="field">
+              <label>Amount</label>
+              <div className="amount-input-wrap">
+                <input
+                  className="input"
+                  type="text"
+                  placeholder="0.00"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                />
+                <div className="amount-suffix">
+                  <button
+                    className="max-btn"
+                    type="button"
+                    onClick={() => {
+                      if (balance) setAmount(balance);
+                    }}
+                  >
+                    MAX
+                  </button>
+                  <div className="unit-badge">XLM</div>
+                </div>
+              </div>
+              <div className="hint">
+                ≈ ${(parseFloat(amount || "0") * 0.13).toFixed(2)} · Tersedia{" "}
+                {balance
+                  ? parseFloat(balance).toLocaleString("id-ID", {
+                      minimumFractionDigits: 2,
+                    })
+                  : "0.00"}{" "}
+                XLM
+              </div>
+            </div>
+
+            <div className="fee-line">
+              <span>Biaya jaringan</span>
+              <strong>~0.00001 XLM (kurang dari $0.01)</strong>
+            </div>
+
+            <button
+              className={btnClass}
+              disabled={btnDisabled}
+              onClick={handleSend}
             >
-              Freighter wallet
-            </a>{" "}
-            to use this dApp.
-          </div>
-        )}
+              {btnContent}
+            </button>
 
-        {/* No wallet connected */}
-        {walletInstalled && !publicKey && (
-          <div className="text-center text-sm text-zinc-500 dark:text-zinc-400">
-            Connect your Freighter wallet to get started.
+            <div className="safety-note">
+              <IconShield />
+              <span>
+                Transaksi kripto tidak bisa dibatalkan. Periksa kembali alamat
+                tujuan sebelum mengirim — dana yang salah kirim tidak dapat
+                dikembalikan.
+              </span>
+            </div>
           </div>
-        )}
-      </main>
+        </div>
+      )}
+
+      {/* ─── HISTORY PANEL ─── */}
+      {publicKey && (
+        <div className={"panel" + (tab === "history" ? " active" : "")}>
+          <div className="history-head">
+            <div className="filter-chips">
+              {(["all", "received", "sent"] as const).map((f) => (
+                <button
+                  key={f}
+                  className={
+                    "chip" +
+                    (historyFilter === f ? " active " + f : "")
+                  }
+                  data-filter={f}
+                  onClick={() => setHistoryFilter(f)}
+                >
+                  <span
+                    className="dot"
+                    style={{
+                      background:
+                        f === "all"
+                          ? "var(--ink-dim)"
+                          : f === "received"
+                          ? "var(--mint)"
+                          : "var(--coral)",
+                    }}
+                  />
+                  {f === "all" ? "All" : f === "received" ? "Received" : "Sent"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {loadingHistory ? (
+            <div
+              style={{
+                textAlign: "center",
+                padding: 48,
+                color: "var(--ink-faint)",
+              }}
+            >
+              <div
+                className="spinner"
+                style={{ margin: "0 auto 12px" }}
+              />
+              <p style={{ fontSize: 13, margin: 0 }}>Loading...</p>
+            </div>
+          ) : filteredHistory.length === 0 ? (
+            <div className="empty-state">
+              <IconClock />
+              <p>Belum ada transaksi di kategori ini.</p>
+            </div>
+          ) : (
+            <div className="tx-list">
+              {filteredHistory.map((p) => {
+                const incoming = isIncoming(p);
+                const otherAddr = incoming ? p.sender : p.receiver;
+                const avatarBg = incoming ? "var(--mint-dim)" : "var(--coral-dim)";
+                const avatarColor = incoming ? "var(--mint)" : "var(--coral)";
+                const avatarText = shorten(otherAddr);
+
+                return (
+                  <div
+                    key={p.id}
+                    className="tx-item"
+                    data-type={incoming ? "received" : "sent"}
+                  >
+                    <div
+                      className="avatar"
+                      style={{
+                        background: avatarBg,
+                        color: avatarColor,
+                        width: 42,
+                        height: 42,
+                        borderRadius: "50%",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        fontFamily: "'JetBrains Mono', monospace",
+                        fontWeight: 600,
+                        fontSize: 13,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {avatarText}
+                    </div>
+                    <div className="tx-info">
+                      <div className="tx-title">
+                        {incoming ? "Received from" : "Sent to"}{" "}
+                        {shorten(otherAddr)}
+                      </div>
+                      <div className="tx-meta">
+                        <span>
+                          {new Date(p.timestamp).toLocaleTimeString("id-ID", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </span>
+                        <span className="sep">·</span>
+                        <span className="mono">{shorten(p.transactionHash)}</span>
+                        <button
+                          className="copy-btn"
+                          title="Salin ID transaksi"
+                          onClick={() =>
+                            copyToClipboard(
+                              p.transactionHash,
+                              "ID transaksi disalin"
+                            )
+                          }
+                        >
+                          <IconCopy />
+                        </button>
+                      </div>
+                    </div>
+                    <div className={"tx-amount " + (incoming ? "in" : "out")}>
+                      {incoming ? "+" : "-"}
+                      {parseFloat(p.amount).toLocaleString("id-ID", {
+                        minimumFractionDigits: 2,
+                      })}{" "}
+                      XLM
+                      <span className="sub">
+                        ≈ ${(parseFloat(p.amount) * 0.13).toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Not connected state */}
+      {walletInstalled && !publicKey && (
+        <div className="empty-state" style={{ display: "block" }}>
+          <IconClock />
+          <p>Connect your Freighter wallet to get started.</p>
+        </div>
+      )}
+
+      {/* Freighter not installed */}
+      {!walletInstalled && (
+        <div
+          className="freighter-missing"
+          style={{ marginTop: 16 }}
+        >
+          Install{" "}
+          <a
+            href="https://freighter.app"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "var(--mint)", fontWeight: 600 }}
+          >
+            Freighter wallet
+          </a>{" "}
+          to use this dApp.
+        </div>
+      )}
+
+      {/* Toast */}
+      <div className={"toast" + (toastMsg ? " show" : "")}>
+        <IconCheck />
+        <span>{toastMsg}</span>
+      </div>
     </div>
   );
 }
