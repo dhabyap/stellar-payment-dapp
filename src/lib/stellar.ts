@@ -1,6 +1,6 @@
 import { 
   isConnected,
-  getAddress,
+  requestAccess,
   signTransaction 
 } from "@stellar/freighter-api";
 import * as StellarSdk from "@stellar/stellar-sdk";
@@ -14,7 +14,7 @@ export const checkFreighter = async () => {
 
 export const connectWallet = async () => {
   try {
-    const { address, error } = await getAddress();
+    const { address, error } = await requestAccess();
     if (error) throw new Error(error);
     return address;
   } catch (error) {
@@ -37,6 +37,8 @@ export const fetchBalance = async (publicKey: string) => {
 export const sendXLM = async (sender: string, destination: string, amount: string) => {
   try {
     const account = await server.loadAccount(sender);
+    const { minTime, maxTime } = await server.fetchTimebounds(300);
+    
     const tx = new StellarSdk.TransactionBuilder(account, {
       fee: String(await server.fetchBaseFee()),
       networkPassphrase: StellarSdk.Networks.TESTNET,
@@ -48,16 +50,23 @@ export const sendXLM = async (sender: string, destination: string, amount: strin
           amount,
         })
       )
-      .setTimeout(30)
+      .setTimebounds(minTime, maxTime)
       .build();
 
-    const result = await signTransaction(tx.toXDR(), {
+    const txXDR = tx.toXDR();
+
+    const result = await signTransaction(txXDR, {
       networkPassphrase: StellarSdk.Networks.TESTNET,
     });
-    const { signedTxXdr } = result;
+
+    const r = result as any;
+    const signedEnvelopeXDR = r.signedTxXdr || r.signedTransaction || r.transactionXdr;
+    if (!signedEnvelopeXDR) {
+      return { success: false, error: "No signed XDR returned from Freighter" };
+    }
 
     const signedTx = StellarSdk.TransactionBuilder.fromXDR(
-      signedTxXdr,
+      signedEnvelopeXDR,
       StellarSdk.Networks.TESTNET
     );
 
@@ -65,9 +74,11 @@ export const sendXLM = async (sender: string, destination: string, amount: strin
     return { success: true, hash: submitResult.hash };
   } catch (error: any) {
     console.error("Transaction failed", error);
-    return { 
-      success: false, 
-      error: error.response?.data?.extras?.result_codes?.operations?.[0] || error.message 
-    };
+    const horizonError = error.response?.data;
+    const txError = horizonError?.extras?.result_codes?.operations?.[0]
+      || horizonError?.extras?.result_codes?.transaction
+      || horizonError?.detail
+      || error.message;
+    return { success: false, error: txError };
   }
 };
