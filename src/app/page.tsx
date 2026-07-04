@@ -143,6 +143,13 @@ export default function Home() {
     localStorage.setItem("stellar_contacts", JSON.stringify(newContacts));
   };
 
+  const deleteContact = (address: string) => {
+    persistContacts(contacts.filter((c) => c.address !== address));
+    if (selectedContact?.address === address) setSelectedContact(null);
+    if (dest === address) setDest("");
+    showToast("Kontak dihapus");
+  };
+
   const saveContact = (name: string, address: string) => {
     if (contacts.find((c) => c.address === address)) return;
     const color = ["#6C63E8", "#3ED9A3", "#FF9F5A", "#FF7A6E", "#7C7CF5", "#FFB84D"][
@@ -383,13 +390,14 @@ export default function Home() {
               </div>
               <div className="contacts-scroll">
                 {contacts.map((c) => (
-                  <button
+                  <div
                     key={c.name + c.address}
                     className={
                       "contact-chip" +
                       (selectedContact?.name === c.name ? " selected" : "")
                     }
                     onClick={() => handleContactClick(c)}
+                    style={{ position: "relative" }}
                   >
                     <div
                       className="avatar"
@@ -398,7 +406,14 @@ export default function Home() {
                       {initials(c.name)}
                     </div>
                     <span className="cname">{c.name}</span>
-                  </button>
+                    <button
+                      className="contact-delete"
+                      onClick={(e) => { e.stopPropagation(); deleteContact(c.address); }}
+                      title="Hapus kontak"
+                    >
+                      ×
+                    </button>
+                  </div>
                 ))}
                 <button className="contact-chip new-contact" onClick={() => showToast("Kontak baru otomatis bisa disimpan setelah transaksi ke alamat baru")}>
                   <div className="avatar">
@@ -407,6 +422,25 @@ export default function Home() {
                   <span className="cname">Baru</span>
                 </button>
               </div>
+              {contacts.length > 4 && (
+                <div className="contact-dropdown-wrap">
+                  <select
+                    className="input contact-dropdown"
+                    value={selectedContact?.address || ""}
+                    onChange={(e) => {
+                      const c = contacts.find((c) => c.address === e.target.value);
+                      if (c) handleContactClick(c);
+                    }}
+                  >
+                    <option value="">Pilih kontak...</option>
+                    {contacts.map((c) => (
+                      <option key={c.address} value={c.address}>
+                        {c.name} — {shorten(c.address)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             <div className="field">

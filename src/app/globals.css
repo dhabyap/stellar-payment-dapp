@@ -281,6 +281,48 @@ body{
   border: 1px dashed var(--card-border);
   color: var(--ink-faint);
 }
+.contact-chip{
+  position: relative;
+}
+.contact-delete{
+  position: absolute;
+  top: 0;
+  right: 4px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--coral);
+  color: #fff;
+  border: none;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity .15s ease, transform .15s ease;
+  pointer-events: none;
+  z-index: 5;
+}
+.contact-chip:hover .contact-delete{
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+.contact-delete:hover{
+  background: #ff4a3e;
+  transform: scale(1.15) !important;
+}
+.contact-dropdown-wrap{
+  margin-top: 10px;
+}
+.contact-dropdown{
+  width: 100%;
+  appearance: auto;
+}
 
 .resolved-contact{
   display:none;
