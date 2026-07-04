@@ -20,7 +20,7 @@ type Payment = {
   transactionHash: string;
 };
 
-const shorten = (key: string) => `${key.slice(0, 4)}...${key.slice(-4)}`;
+const shorten = (key: string | null | undefined) => key ? `${key.slice(0, 4)}...${key.slice(-4)}` : "—";
 
 export default function Home() {
   const [walletInstalled, setWalletInstalled] = useState(false);
@@ -75,7 +75,7 @@ export default function Home() {
     }
   };
 
-  const isIncoming = (p: Payment) => p.receiver === publicKey;
+  const isIncoming = (p: Payment) => publicKey && (p.receiver === publicKey);
 
   return (
     <div className="flex flex-1 flex-col items-center p-4 sm:p-8">
