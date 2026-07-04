@@ -95,6 +95,13 @@ const IconClock = () => (
   </svg>
 );
 
+const IconPlus = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+    <line x1="12" y1="5" x2="12" y2="19" />
+    <line x1="5" y1="12" x2="19" y2="12" />
+  </svg>
+);
+
 export default function Home() {
   const [walletInstalled, setWalletInstalled] = useState(false);
   const [publicKey, setPublicKey] = useState<string | null>(null);
@@ -108,11 +115,21 @@ export default function Home() {
   const [historyFilter, setHistoryFilter] = useState<"all" | "sent" | "received">("all");
   const [toastMsg, setToastMsg] = useState("");
   const [selectedContact, setSelectedContact] = useState<Contact | null>(null);
+  const [contacts, setContacts] = useState<Contact[]>(DEFAULT_CONTACTS);
+  const [savePrompt, setSavePrompt] = useState<{ address: string } | null>(null);
+  const [newContactName, setNewContactName] = useState("");
 
   const toastTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   useEffect(() => {
     checkFreighter().then((res) => setWalletInstalled(res.isConnected));
+    const saved = localStorage.getItem("stellar_contacts");
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length) setContacts(parsed);
+      } catch {}
+    }
   }, []);
 
   const showToast = useCallback((msg: string) => {
@@ -120,6 +137,19 @@ export default function Home() {
     setToastMsg(msg);
     toastTimer.current = setTimeout(() => setToastMsg(""), 2200);
   }, []);
+
+  const persistContacts = (newContacts: Contact[]) => {
+    setContacts(newContacts);
+    localStorage.setItem("stellar_contacts", JSON.stringify(newContacts));
+  };
+
+  const saveContact = (name: string, address: string) => {
+    if (contacts.find((c) => c.address === address)) return;
+    const color = ["#6C63E8", "#3ED9A3", "#FF9F5A", "#FF7A6E", "#7C7CF5", "#FFB84D"][
+      contacts.length % 6
+    ];
+    persistContacts([...contacts, { name, address, color }]);
+  };
 
   const loadHistory = useCallback(async (key: string) => {
     setLoadingHistory(true);
@@ -147,25 +177,56 @@ export default function Home() {
 
   const handleSend = async () => {
     if (!publicKey || !dest.trim() || !amount || parseFloat(amount) <= 0) return;
+    const addr = dest.trim();
     setTxStatus({ type: "loading", message: "Processing..." });
-    const result = await sendXLM(publicKey, dest.trim(), amount);
+    const result = await sendXLM(publicKey, addr, amount);
     if (result.success) {
       setTxStatus({ type: "success", hash: result.hash, message: "Transaction successful!" });
       const bal = await fetchBalance(publicKey);
       setBalance(bal);
       loadHistory(publicKey);
       showToast(`${amount} XLM berhasil dikirim`);
-      // Reset form after a beat
+      // Prompt to save contact if unknown
+      if (!contacts.find((c) => c.address === addr)) {
+        setSavePrompt({ address: addr });
+      } else {
+        setTimeout(() => {
+          setDest("");
+          setAmount("");
+          setSelectedContact(null);
+          setTxStatus({ type: null });
+        }, 2000);
+      }
+    } else {
+      setTxStatus({ type: "error", message: result.error || "Transaction failed" });
+      showToast("Gagal: " + (result.error || "unknown error"));
+    }
+  };
+
+  const handleSaveConfirm = () => {
+    if (savePrompt && newContactName.trim()) {
+      saveContact(newContactName.trim(), savePrompt.address);
+      setSavePrompt(null);
+      setNewContactName("");
+      showToast("Kontak tersimpan");
       setTimeout(() => {
         setDest("");
         setAmount("");
         setSelectedContact(null);
         setTxStatus({ type: null });
-      }, 2000);
-    } else {
-      setTxStatus({ type: "error", message: result.error || "Transaction failed" });
-      showToast("Gagal: " + (result.error || "unknown error"));
+      }, 800);
     }
+  };
+
+  const handleSaveSkip = () => {
+    setSavePrompt(null);
+    setNewContactName("");
+    setTimeout(() => {
+      setDest("");
+      setAmount("");
+      setSelectedContact(null);
+      setTxStatus({ type: null });
+    }, 200);
   };
 
   const copyToClipboard = (text: string, label: string) => {
@@ -185,7 +246,7 @@ export default function Home() {
 
   // ── Resolve contact from typed address ──
   const resolvedContact = dest.trim()
-    ? DEFAULT_CONTACTS.find((c) => c.address === dest.trim()) || null
+    ? contacts.find((c) => c.address === dest.trim()) || null
     : null;
 
   // ── Filter history ──
@@ -196,7 +257,7 @@ export default function Home() {
   });
 
   // ── Send button state ──
-  const btnDisabled = !checkSendValid();
+  const btnDisabled = !checkSendValid() || savePrompt !== null;
   let btnContent: React.ReactNode;
   if (txStatus.type === "loading") {
     btnContent = (
@@ -321,9 +382,9 @@ export default function Home() {
                 <label>Kirim ke kontak tersimpan</label>
               </div>
               <div className="contacts-scroll">
-                {DEFAULT_CONTACTS.map((c) => (
+                {contacts.map((c) => (
                   <button
-                    key={c.name}
+                    key={c.name + c.address}
                     className={
                       "contact-chip" +
                       (selectedContact?.name === c.name ? " selected" : "")
@@ -339,12 +400,9 @@ export default function Home() {
                     <span className="cname">{c.name}</span>
                   </button>
                 ))}
-                <button className="contact-chip new-contact" onClick={() => showToast("Kontak baru bisa disimpan setelah transaksi pertama")}>
+                <button className="contact-chip new-contact" onClick={() => showToast("Kontak baru otomatis bisa disimpan setelah transaksi ke alamat baru")}>
                   <div className="avatar">
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <line x1="12" y1="5" x2="12" y2="19" />
-                      <line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
+                    <IconPlus />
                   </div>
                   <span className="cname">Baru</span>
                 </button>
@@ -426,6 +484,64 @@ export default function Home() {
               {btnContent}
             </button>
 
+            {/* Save contact prompt */}
+            {savePrompt && (
+              <div style={{
+                marginTop: 12,
+                padding: 14,
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--card-border)",
+                borderRadius: "var(--radius-sm)",
+              }}>
+                <p style={{ fontSize: 13, color: "var(--ink-dim)", margin: "0 0 10px" }}>
+                  Simpan <span className="mono" style={{ color: "var(--mint)" }}>{shorten(savePrompt.address)}</span> sebagai kontak?
+                </p>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    type="text"
+                    placeholder="Nama kontak..."
+                    value={newContactName}
+                    onChange={(e) => setNewContactName(e.target.value)}
+                    style={{ marginBottom: 0, flex: 1 }}
+                    autoFocus
+                  />
+                  <button
+                    style={{
+                      background: "var(--mint-dim)",
+                      border: "none",
+                      color: "var(--mint)",
+                      padding: "8px 14px",
+                      borderRadius: "var(--radius-sm)",
+                      fontFamily: "inherit",
+                      fontWeight: 700,
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                    disabled={!newContactName.trim()}
+                    onClick={handleSaveConfirm}
+                  >
+                    Simpan
+                  </button>
+                  <button
+                    style={{
+                      background: "transparent",
+                      border: "1px solid var(--card-border)",
+                      color: "var(--ink-dim)",
+                      padding: "8px 14px",
+                      borderRadius: "var(--radius-sm)",
+                      fontFamily: "inherit",
+                      fontSize: 13,
+                      cursor: "pointer",
+                    }}
+                    onClick={handleSaveSkip}
+                  >
+                    Lewati
+                  </button>
+                </div>
+              </div>
+            )}
+
             <div className="safety-note">
               <IconShield />
               <span>
@@ -494,9 +610,20 @@ export default function Home() {
               {filteredHistory.map((p) => {
                 const incoming = isIncoming(p);
                 const otherAddr = incoming ? p.sender : p.receiver;
-                const avatarBg = incoming ? "var(--mint-dim)" : "var(--coral-dim)";
                 const avatarColor = incoming ? "var(--mint)" : "var(--coral)";
-                const avatarText = (otherAddr || "").slice(0, 2).toUpperCase();
+
+                // Find contact name for this address
+                const knownContact = contacts.find(
+                  (c) => c.address === otherAddr
+                );
+                const avatarBg = knownContact
+                  ? knownContact.color
+                  : incoming
+                  ? "var(--mint-dim)"
+                  : "var(--coral-dim)";
+                const avatarText = knownContact
+                  ? initials(knownContact.name)
+                  : (otherAddr || "").slice(0, 2).toUpperCase();
 
                 return (
                   <div
@@ -524,9 +651,13 @@ export default function Home() {
                       {avatarText}
                     </div>
                     <div className="tx-info">
-                      <div className="tx-title">
+                      <div className="tx-title" style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                         {incoming ? "Received from" : "Sent to"}{" "}
-                        {shorten(otherAddr)}
+                        {knownContact ? (
+                          <span style={{ color: knownContact.color }}>{knownContact.name}</span>
+                        ) : (
+                          shorten(otherAddr)
+                        )}
                       </div>
                       <div className="tx-meta">
                         <span>
