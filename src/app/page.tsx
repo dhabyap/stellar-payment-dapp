@@ -496,7 +496,7 @@ export default function Home() {
                 const otherAddr = incoming ? p.sender : p.receiver;
                 const avatarBg = incoming ? "var(--mint-dim)" : "var(--coral-dim)";
                 const avatarColor = incoming ? "var(--mint)" : "var(--coral)";
-                const avatarText = shorten(otherAddr);
+                const avatarText = (otherAddr || "").slice(0, 2).toUpperCase();
 
                 return (
                   <div
