@@ -22,12 +22,31 @@ export const ERR = {
   BALANCE: "insufficient_balance",
 } as const;
 
+// ── Wallet modules ──
+let _freighterModule: FreighterModule | null = null;
+let _lobstrModule: LobstrModule | null = null;
+let _xbullModule: ModuleInterface | null = null;
+
+// Use lazy ModuleInterface instead of concrete types for compat
+import type { ModuleInterface } from "@creit.tech/stellar-wallets-kit";
+
+function getModules(): ModuleInterface[] {
+  if (!_freighterModule) _freighterModule = new FreighterModule();
+  if (!_lobstrModule) _lobstrModule = new LobstrModule();
+  if (!_xbullModule) _xbullModule = new xBullModule();
+  return [_freighterModule, _lobstrModule, _xbullModule];
+}
+
+const WALLET_INFO: Record<string, { name: string; icon: string; desc: string }> = {
+  [FREIGHTER_ID]: { name: "Freighter", icon: "⬡", desc: "Freighter browser extension" },
+};
+
 // ── Init kit ──
 let inited = false;
 function ensureKit() {
   if (!inited) {
     StellarWalletsKit.init({
-      modules: [new FreighterModule(), new LobstrModule(), new xBullModule()],
+      modules: getModules(),
       network: StellarSdk.Networks.TESTNET,
       selectedWalletId: FREIGHTER_ID,
     });
@@ -35,19 +54,32 @@ function ensureKit() {
   }
 }
 
-// ── Check wallets ──
+export { WALLET_INFO, FREIGHTER_ID };
+
+// ── Check wallets (uses extension messaging, not window.freighter) ──
 export async function checkWallets(): Promise<{
   available: boolean;
   detected: string[];
 }> {
+  const modules = getModules();
   const detected: string[] = [];
-  if (typeof window !== "undefined") {
-    const w = window as any;
-    if (w?.stellar?.isConnected) detected.push("freighter");
-    if (w?.lobstr) detected.push("lobstr");
-    if (w?.xbull) detected.push("xbull");
+
+  for (let pass = 0; pass < 3; pass++) {
+    detected.length = 0;
+    for (const mod of modules) {
+      try {
+        const avail = await mod.isAvailable();
+        if (avail) detected.push(mod.productId);
+      } catch {
+        // module check rejected or timed out
+      }
+    }
+    if (detected.length > 0) return { available: true, detected };
+    // Wait between passes — extension might still be waking up
+    if (pass < 2) await new Promise((r) => setTimeout(r, 500));
   }
-  return { available: detected.length > 0, detected };
+
+  return { available: false, detected: [] };
 }
 
 // ── Connect ──

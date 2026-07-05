@@ -17,7 +17,7 @@ import {
 } from "@/lib/contract";
 
 // ── Contract address (testnet) ──
-const CONTRACT_ID = "CCT2M2PKPKNHT4IITJW2WKFGVXFNH6TGP3IUZHBQAV7MBOQDDNNK5IFS";
+const CONTRACT_ID = "CBGPGATQZO74UKFKOFJ5N7FRQGY3DSQQ6DB32B2NG6IATX6QNE4M5VHE";
 
 type TxStatus = {
   type: "success" | "error" | "loading" | null;

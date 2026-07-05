@@ -26,6 +26,7 @@ export default function RootLayout({
     <html
       lang="id"
       className={`${spaceGrotesk.variable} ${jetbrainsMono.variable}`}
+      suppressHydrationWarning
     >
       <body>{children}</body>
     </html>

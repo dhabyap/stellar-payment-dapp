@@ -39,8 +39,8 @@ Multi-wallet dApp + Soroban smart contract + real-time status tracking.
 | Field | Value |
 |-------|-------|
 | **Network** | Testnet |
-| **Address** | `CCT2M2PKPKNHT4IITJW2WKFGVXFNH6TGP3IUZHBQAV7MBOQDDNNK5IFS` |
-| **Explorer** | [View on stellar.expert](https://stellar.expert/explorer/testnet/contract/CCT2M2PKPKNHT4IITJW2WKFGVXFNH6TGP3IUZHBQAV7MBOQDDNNK5IFS) |
+| **Address** | `CBGPGATQZO74UKFKOFJ5N7FRQGY3DSQQ6DB32B2NG6IATX6QNE4M5VHE` |
+| **Explorer** | [View on stellar.expert](https://stellar.expert/explorer/testnet/contract/CBGPGATQZO74UKFKOFJ5N7FRQGY3DSQQ6DB32B2NG6IATX6QNE4M5VHE) |
 
 ## Transaction Hash (contract deploy)
 
